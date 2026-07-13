@@ -1,7 +1,16 @@
 #include "Config.h"
 #include "Server.h"
 
+#include <csignal>
 #include <iostream>
+
+Server* g_server = nullptr;
+
+void handleSignal(int) {
+    if (g_server != nullptr) {
+        g_server->stop();
+    }
+}
 
 int main() {
     Config config;
@@ -21,9 +30,14 @@ int main() {
         config.rootDir()
     );
 
+    g_server = &server;
+    std::signal(SIGINT, handleSignal);
+
     if (!server.start()) {
         return 1;
     }
+
+    g_server = nullptr;
 
     return 0;
 }
