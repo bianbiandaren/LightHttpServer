@@ -1,24 +1,50 @@
 body {
     margin: 0;
-    font-family: Arial, sans-serif;
-    background: #f4f6f8;
+    font-family: Arial, "Microsoft YaHei", sans-serif;
+    line-height: 1.6;
+    color: #222;
+    background: #f3f5f7;
 }
 
 .container {
-    width: 600px;
-    margin: 100px auto;
-    padding: 40px;
+    max-width: 640px;
+    margin: 80px auto;
+    padding: 32px;
     text-align: center;
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
 }
 
 h1 {
-    color: #1f4e79;
+    margin-top: 0;
+    color: #22577a;
+}
+
+.status {
+    font-size: 20px;
+    font-weight: bold;
+    color: #2d6a4f;
 }
 
 button {
-    padding: 10px 18px;
+    padding: 8px 16px;
+    border: 1px solid #22577a;
+    border-radius: 4px;
+    color: #fff;
+    background: #22577a;
     cursor: pointer;
+}
+
+button:hover {
+    background: #17415c;
+}
+
+a {
+    color: #22577a;
+}
+
+#message {
+    min-height: 24px;
+    color: #2d6a4f;
 }
