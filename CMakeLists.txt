@@ -4,13 +4,11 @@ project(LightHttpServer)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_executable(LightHttpServer
-    src/main.cpp
-    src/Config.cpp
-    src/Server.cpp
-    src/Utils.cpp
-)
+file(GLOB SRC_FILES src/*.cpp)
+
+add_executable(LightHttpServer ${SRC_FILES})
 
 target_include_directories(
     LightHttpServer

@@ -2,16 +2,11 @@
 #include "Utils.h"
 
 #include <fstream>
-#include <iostream>
 
 bool Config::load(const std::string& filename) {
     std::ifstream file(filename);
 
     if (!file.is_open()) {
-        std::cerr << "Cannot open config file: "
-                  << filename
-                  << '\n';
-
         return false;
     }
 
@@ -37,9 +32,13 @@ bool Config::load(const std::string& filename) {
             Utils::trim(line.substr(equalPos + 1));
 
         if (key == "PORT") {
-            port_ = std::stoi(value);
+            if (!value.empty()) {
+                port_ = std::stoi(value);
+            }
         } else if (key == "ROOT_DIR") {
-            rootDir_ = value;
+            if (!value.empty()) {
+                rootDir_ = value;
+            }
         }
     }
 

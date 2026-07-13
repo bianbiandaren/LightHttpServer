@@ -10,7 +10,20 @@
 Server::Server(
     int port,
     const std::string& rootDir
-) : port_(port), rootDir_(rootDir) {
+) : port_(port), rootDir_(rootDir), serverSocket_(-1), running_(false) {
+}
+
+Server::~Server() {
+    stop();
+}
+
+void Server::stop() {
+    running_ = false;
+
+    if (serverSocket_ != -1) {
+        close(serverSocket_);
+        serverSocket_ = -1;
+    }
 }
 
 bool Server::start() {

@@ -1,6 +1,8 @@
 #include "Utils.h"
 
 #include <cctype>
+#include <fstream>
+#include <sstream>
 
 namespace Utils {
 
@@ -24,6 +26,23 @@ std::string trim(const std::string& text) {
     }
 
     return text.substr(begin, end - begin);
+}
+
+std::string readFile(const std::string& path) {
+    std::ifstream file(path, std::ios::binary);
+
+    if (!file.is_open()) {
+        return "";
+    }
+
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+
+    return buffer.str();
+}
+
+bool isSafePath(const std::string& path) {
+    return path.find("..") == std::string::npos;
 }
 
 }
