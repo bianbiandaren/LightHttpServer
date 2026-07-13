@@ -4,12 +4,10 @@
 #include <csignal>
 #include <iostream>
 
-Server* g_server = nullptr;
+volatile std::sig_atomic_t g_stopRequested = 0;
 
 void handleSignal(int) {
-    if (g_server != nullptr) {
-        g_server->stop();
-    }
+    g_stopRequested = 1;
 }
 
 int main() {
@@ -30,14 +28,12 @@ int main() {
         config.rootDir()
     );
 
-    g_server = &server;
+    server.setStopFlag(&g_stopRequested);
     std::signal(SIGINT, handleSignal);
 
     if (!server.start()) {
         return 1;
     }
-
-    g_server = nullptr;
 
     return 0;
 }

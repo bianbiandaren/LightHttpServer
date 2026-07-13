@@ -8,23 +8,116 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cstring>
-#include <fstream>
+#include <fcntl.h>
 #include <iostream>
+#include <sys/epoll.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
+namespace {
+const int MAX_EVENTS = 64;
+const std::size_t MAX_REQUEST_SIZE = 64 * 1024;
+}
 
 Server::Server(
     int port,
     const std::string& rootDir
-) : port_(port), rootDir_(rootDir), serverSocket_(-1), running_(false) {
+) : port_(port),
+    rootDir_(rootDir),
+    serverSocket_(-1),
+    epollFd_(-1),
+    running_(false),
+    stopFlag_(nullptr) {
 }
 
 Server::~Server() {
     stop();
 }
 
+void Server::setStopFlag(const volatile std::sig_atomic_t* stopFlag) {
+    stopFlag_ = stopFlag;
+}
+
+bool Server::start() {
+    if (!setupListenSocket()) {
+        return false;
+    }
+
+    if (!setupEpoll()) {
+        stop();
+        return false;
+    }
+
+    running_ = true;
+
+    std::cout << "Server is listening on port "
+              << port_
+              << '\n';
+
+    epoll_event events[MAX_EVENTS];
+
+    while (running_ && !shouldStop()) {
+        const int count = epoll_wait(epollFd_, events, MAX_EVENTS, 1000);
+
+        if (count == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+
+            std::cerr << "epoll_wait failed: "
+                      << std::strerror(errno)
+                      << '\n';
+            stop();
+            return false;
+        }
+
+        for (int i = 0; i < count; ++i) {
+            const int fd = events[i].data.fd;
+            const uint32_t eventMask = events[i].events;
+
+            if (fd == serverSocket_) {
+                acceptClients();
+                continue;
+            }
+
+            if (
+                eventMask & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)
+            ) {
+                closeClient(fd);
+                continue;
+            }
+
+            if (eventMask & EPOLLIN) {
+                handleRead(fd);
+            }
+
+            if (
+                clients_.find(fd) != clients_.end() &&
+                (eventMask & EPOLLOUT)
+            ) {
+                handleWrite(fd);
+            }
+        }
+    }
+
+    stop();
+    return true;
+}
+
 void Server::stop() {
     running_ = false;
+
+    for (auto& item : clients_) {
+        close(item.first);
+    }
+
+    clients_.clear();
+
+    if (epollFd_ != -1) {
+        close(epollFd_);
+        epollFd_ = -1;
+    }
 
     if (serverSocket_ != -1) {
         close(serverSocket_);
@@ -32,7 +125,7 @@ void Server::stop() {
     }
 }
 
-bool Server::start() {
+bool Server::setupListenSocket() {
     serverSocket_ = socket(AF_INET, SOCK_STREAM, 0);
 
     if (serverSocket_ == -1) {
@@ -56,12 +149,14 @@ bool Server::start() {
         std::cerr << "setsockopt failed: "
                   << std::strerror(errno)
                   << '\n';
-
-        stop();
         return false;
     }
 
-    sockaddr_in serverAddress{};
+    if (!setNonBlocking(serverSocket_)) {
+        return false;
+    }
+
+    sockaddr_in serverAddress {};
     serverAddress.sin_family = AF_INET;
     serverAddress.sin_port = htons(port_);
     serverAddress.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -76,71 +171,227 @@ bool Server::start() {
         std::cerr << "bind failed: "
                   << std::strerror(errno)
                   << '\n';
-
-        stop();
         return false;
     }
 
-    if (listen(serverSocket_, 16) == -1) {
+    if (listen(serverSocket_, 128) == -1) {
         std::cerr << "listen failed: "
                   << std::strerror(errno)
                   << '\n';
-
-        stop();
         return false;
     }
 
-    running_ = true;
+    return true;
+}
 
-    std::cout << "Server is listening on port "
-              << port_
-              << '\n';
+bool Server::setupEpoll() {
+    epollFd_ = epoll_create1(0);
 
-    while (running_) {
-        sockaddr_in clientAddress{};
+    if (epollFd_ == -1) {
+        std::cerr << "epoll_create1 failed: "
+                  << std::strerror(errno)
+                  << '\n';
+        return false;
+    }
+
+    return addToEpoll(serverSocket_, EPOLLIN);
+}
+
+bool Server::setNonBlocking(int fd) {
+    const int flags = fcntl(fd, F_GETFL, 0);
+
+    if (flags == -1) {
+        std::cerr << "fcntl get failed: "
+                  << std::strerror(errno)
+                  << '\n';
+        return false;
+    }
+
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+        std::cerr << "fcntl set failed: "
+                  << std::strerror(errno)
+                  << '\n';
+        return false;
+    }
+
+    return true;
+}
+
+bool Server::addToEpoll(int fd, uint32_t events) {
+    epoll_event event {};
+    event.events = events;
+    event.data.fd = fd;
+
+    if (epoll_ctl(epollFd_, EPOLL_CTL_ADD, fd, &event) == -1) {
+        std::cerr << "epoll add failed: "
+                  << std::strerror(errno)
+                  << '\n';
+        return false;
+    }
+
+    return true;
+}
+
+bool Server::modifyEpoll(int fd, uint32_t events) {
+    epoll_event event {};
+    event.events = events;
+    event.data.fd = fd;
+
+    if (epoll_ctl(epollFd_, EPOLL_CTL_MOD, fd, &event) == -1) {
+        std::cerr << "epoll modify failed: "
+                  << std::strerror(errno)
+                  << '\n';
+        return false;
+    }
+
+    return true;
+}
+
+void Server::removeFromEpoll(int fd) {
+    if (epollFd_ != -1) {
+        epoll_ctl(epollFd_, EPOLL_CTL_DEL, fd, nullptr);
+    }
+}
+
+void Server::acceptClients() {
+    while (true) {
+        sockaddr_in clientAddress {};
         socklen_t clientAddressLength = sizeof(clientAddress);
 
-        int clientSocket = accept(
+        const int clientFd = accept(
             serverSocket_,
             reinterpret_cast<sockaddr*>(&clientAddress),
             &clientAddressLength
         );
 
-        if (clientSocket == -1) {
-            if (!running_) {
+        if (clientFd == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
+            }
+
+            if (errno == EINTR) {
+                continue;
             }
 
             std::cerr << "accept failed: "
                       << std::strerror(errno)
                       << '\n';
+            break;
+        }
+
+        if (!setNonBlocking(clientFd)) {
+            close(clientFd);
             continue;
         }
 
-        handleClient(clientSocket);
-        close(clientSocket);
-    }
+        if (!addToEpoll(clientFd, EPOLLIN | EPOLLRDHUP)) {
+            close(clientFd);
+            continue;
+        }
 
-    stop();
-    return true;
+        clients_[clientFd] = ClientConnection {};
+    }
 }
 
-void Server::handleClient(int clientSocket) {
-    char buffer[4096];
-    const ssize_t received = recv(
-        clientSocket,
-        buffer,
-        sizeof(buffer),
-        0
-    );
+void Server::handleRead(int clientFd) {
+    auto it = clients_.find(clientFd);
 
-    if (received <= 0) {
+    if (it == clients_.end()) {
         return;
     }
 
-    const std::string rawRequest(buffer, received);
-    const std::string response = handleRequest(rawRequest);
-    sendAll(clientSocket, response);
+    char buffer[4096];
+
+    while (true) {
+        const ssize_t count = recv(clientFd, buffer, sizeof(buffer), 0);
+
+        if (count > 0) {
+            it->second.requestBuffer.append(
+                buffer,
+                static_cast<std::size_t>(count)
+            );
+
+            if (it->second.requestBuffer.size() > MAX_REQUEST_SIZE) {
+                it->second.responseBuffer = getErrorResponse(400);
+                it->second.sentBytes = 0;
+                modifyEpoll(clientFd, EPOLLOUT | EPOLLRDHUP);
+                return;
+            }
+
+            if (
+                it->second.requestBuffer.find("\r\n\r\n") !=
+                std::string::npos
+            ) {
+                it->second.responseBuffer =
+                    handleRequest(it->second.requestBuffer);
+                it->second.sentBytes = 0;
+                modifyEpoll(clientFd, EPOLLOUT | EPOLLRDHUP);
+                return;
+            }
+
+            continue;
+        }
+
+        if (count == 0) {
+            closeClient(clientFd);
+            return;
+        }
+
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return;
+        }
+
+        if (errno == EINTR) {
+            continue;
+        }
+
+        closeClient(clientFd);
+        return;
+    }
+}
+
+void Server::handleWrite(int clientFd) {
+    auto it = clients_.find(clientFd);
+
+    if (it == clients_.end()) {
+        return;
+    }
+
+    std::string& response = it->second.responseBuffer;
+    std::size_t& sentBytes = it->second.sentBytes;
+
+    while (sentBytes < response.size()) {
+        const ssize_t count = send(
+            clientFd,
+            response.data() + sentBytes,
+            response.size() - sentBytes,
+            0
+        );
+
+        if (count > 0) {
+            sentBytes += static_cast<std::size_t>(count);
+            continue;
+        }
+
+        if (count == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            return;
+        }
+
+        if (count == -1 && errno == EINTR) {
+            continue;
+        }
+
+        closeClient(clientFd);
+        return;
+    }
+
+    closeClient(clientFd);
+}
+
+void Server::closeClient(int clientFd) {
+    removeFromEpoll(clientFd);
+    close(clientFd);
+    clients_.erase(clientFd);
 }
 
 std::string Server::handleRequest(const std::string& rawRequest) {
@@ -177,13 +428,15 @@ std::string Server::handleRequest(const std::string& rawRequest) {
 }
 
 std::string Server::serveFile(const std::string& filePath) {
-    std::ifstream file(filePath, std::ios::binary);
+    struct stat fileStat {};
 
-    if (!file.is_open()) {
+    if (stat(filePath.c_str(), &fileStat) == -1) {
         return getErrorResponse(404);
     }
 
-    file.close();
+    if (!S_ISREG(fileStat.st_mode)) {
+        return getErrorResponse(403);
+    }
 
     HttpResponse response;
     response.setStatus(200);
@@ -207,9 +460,12 @@ std::string Server::getErrorResponse(int statusCode) {
     }
 
     if (!errorPage.empty()) {
-        std::ifstream file(errorPage, std::ios::binary);
+        struct stat fileStat {};
 
-        if (file.is_open()) {
+        if (
+            stat(errorPage.c_str(), &fileStat) == 0 &&
+            S_ISREG(fileStat.st_mode)
+        ) {
             body = Utils::readFile(errorPage);
             response.setContentType("text/html; charset=utf-8");
         }
@@ -235,26 +491,6 @@ std::string Server::getErrorResponse(int statusCode) {
     return response.build();
 }
 
-bool Server::sendAll(
-    int clientSocket,
-    const std::string& data
-) {
-    std::size_t sentTotal = 0;
-
-    while (sentTotal < data.size()) {
-        const ssize_t sent = send(
-            clientSocket,
-            data.data() + sentTotal,
-            data.size() - sentTotal,
-            0
-        );
-
-        if (sent <= 0) {
-            return false;
-        }
-
-        sentTotal += static_cast<std::size_t>(sent);
-    }
-
-    return true;
+bool Server::shouldStop() const {
+    return stopFlag_ != nullptr && *stopFlag_ != 0;
 }

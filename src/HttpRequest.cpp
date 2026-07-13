@@ -28,6 +28,15 @@ bool HttpRequest::parse(const std::string& rawRequest) {
         return false;
     }
 
+    std::string extra;
+
+    if (requestStream >> extra) {
+        method_.clear();
+        uri_.clear();
+        version_.clear();
+        return false;
+    }
+
     if (
         version_ != "HTTP/1.0" &&
         version_ != "HTTP/1.1"

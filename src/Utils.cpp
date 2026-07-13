@@ -1,8 +1,8 @@
 #include "Utils.h"
 
 #include <cctype>
-#include <fstream>
-#include <sstream>
+#include <fcntl.h>
+#include <unistd.h>
 
 namespace Utils {
 
@@ -29,20 +29,39 @@ std::string trim(const std::string& text) {
 }
 
 std::string readFile(const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
+    int fd = open(path.c_str(), O_RDONLY);
 
-    if (!file.is_open()) {
+    if (fd == -1) {
         return "";
     }
 
-    std::ostringstream buffer;
-    buffer << file.rdbuf();
+    std::string content;
+    char buffer[4096];
 
-    return buffer.str();
+    while (true) {
+        const ssize_t count = read(fd, buffer, sizeof(buffer));
+
+        if (count > 0) {
+            content.append(buffer, static_cast<std::size_t>(count));
+        } else {
+            break;
+        }
+    }
+
+    close(fd);
+    return content;
 }
 
 bool isSafePath(const std::string& path) {
-    return path.find("..") == std::string::npos;
+    if (path.find("..") != std::string::npos) {
+        return false;
+    }
+
+    if (path.find('\\') != std::string::npos) {
+        return false;
+    }
+
+    return true;
 }
 
 }
