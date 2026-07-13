@@ -8,8 +8,10 @@ bool Config::load(const std::string& filename) {
     std::ifstream file(filename);
 
     if (!file.is_open()) {
-        std::cerr << "Cannot open config file: " << filename
-                  << ", using default configuration.\n";
+        std::cerr << "Cannot open config file: "
+                  << filename
+                  << '\n';
+
         return false;
     }
 
@@ -28,17 +30,16 @@ bool Config::load(const std::string& filename) {
             continue;
         }
 
-        const std::string key = Utils::trim(line.substr(0, equalPos));
-        const std::string value = Utils::trim(line.substr(equalPos + 1));
+        const std::string key =
+            Utils::trim(line.substr(0, equalPos));
 
-        try {
-            if (key == "PORT") {
-                port_ = std::stoi(value);
-            } else if (key == "ROOT_DIR") {
-                rootDir_ = value;
-            }
-        } catch (const std::exception&) {
-            std::cerr << "Invalid configuration: " << line << '\n';
+        const std::string value =
+            Utils::trim(line.substr(equalPos + 1));
+
+        if (key == "PORT") {
+            port_ = std::stoi(value);
+        } else if (key == "ROOT_DIR") {
+            rootDir_ = value;
         }
     }
 

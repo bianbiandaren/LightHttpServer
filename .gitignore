@@ -1,5 +1,13 @@
+# CMake build directory
 build/
+
+# VSCode settings
 .vscode/
+
+# Compiler output
 *.o
 *.out
+*.exe
+
+# Log files
 *.log
