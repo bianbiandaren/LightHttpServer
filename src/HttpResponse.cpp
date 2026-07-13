@@ -49,6 +49,8 @@ std::string HttpResponse::statusText(int statusCode) {
             return "OK";
         case 400:
             return "Bad Request";
+        case 403:
+            return "Forbidden";
         case 404:
             return "Not Found";
         case 501:

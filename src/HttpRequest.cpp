@@ -3,9 +3,28 @@
 #include <sstream>
 
 bool HttpRequest::parse(const std::string& rawRequest) {
-    std::istringstream requestStream(rawRequest);
+    method_.clear();
+    uri_.clear();
+    version_.clear();
+
+    if (rawRequest.empty()) {
+        return false;
+    }
+
+    std::istringstream rawStream(rawRequest);
+    std::string requestLine;
+    std::getline(rawStream, requestLine);
+
+    if (!requestLine.empty() && requestLine.back() == '\r') {
+        requestLine.pop_back();
+    }
+
+    std::istringstream requestStream(requestLine);
 
     if (!(requestStream >> method_ >> uri_ >> version_)) {
+        method_.clear();
+        uri_.clear();
+        version_.clear();
         return false;
     }
 
@@ -13,6 +32,9 @@ bool HttpRequest::parse(const std::string& rawRequest) {
         version_ != "HTTP/1.0" &&
         version_ != "HTTP/1.1"
     ) {
+        method_.clear();
+        uri_.clear();
+        version_.clear();
         return false;
     }
 
