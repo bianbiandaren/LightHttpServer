@@ -32,3 +32,25 @@ target_compile_options(
 if(WIN32)
     target_link_libraries(LightHttpServer ws2_32)
 endif()
+
+# Security test targets
+add_executable(handle_flood_test tests/handle_flood_test.cpp)
+add_executable(half_packet_test tests/half_packet_test.cpp)
+add_executable(slowloris_test tests/slowloris_test.cpp)
+add_executable(request_smuggling_test tests/request_smuggling_test.cpp)
+add_executable(directory_traversal_test tests/directory_traversal_test.cpp)
+
+set(TEST_TARGETS
+    handle_flood_test
+    half_packet_test
+    slowloris_test
+    request_smuggling_test
+    directory_traversal_test
+)
+
+foreach(target IN LISTS TEST_TARGETS)
+    target_compile_features(${target} PRIVATE cxx_std_17)
+    if(WIN32)
+        target_link_libraries(${target} ws2_32)
+    endif()
+endforeach()
